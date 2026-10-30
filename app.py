@@ -79,7 +79,7 @@ app.register_blueprint(api_bp)
 
 REACT_DIST = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
 
-# Serve React SPA for all frontend routes
+# Serve React SPA if dist exists (monolith mode); otherwise return clean API status
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react(path):
@@ -89,7 +89,13 @@ def serve_react(path):
             return send_from_directory(REACT_DIST, path)
         else:
             return send_from_directory(REACT_DIST, 'index.html')
-    return "React frontend build not found. Run 'npm run build' in the frontend folder.", 500
+    return jsonify({
+        "service": "GeoAttend Backend API",
+        "status": "online",
+        "database": "connected" if app.db is not None else "disconnected",
+        "health": "/api/health",
+        "version": "1.0.0"
+    }), 200
 
 # Ensure the initial administrator account exists
 def init_admin():
