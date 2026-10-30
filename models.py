@@ -6,7 +6,7 @@ import uuid
 
 class Database:
     def __init__(self, uri, db_name):
-        self.client = MongoClient(uri)
+        self.client = MongoClient(uri, serverSelectionTimeoutMS=5000)
         self.db = self.client[db_name]
         
         # Collections
@@ -16,20 +16,23 @@ class Database:
         self.attendance = self.db.attendance
         self.proxy_attempts = self.db.proxy_attempts
         
-        # Create indexes
+        # Create indexes with error tolerance
         self._create_indexes()
     
     def _create_indexes(self):
-        self.users.create_index('email', unique=True)
-        self.users.create_index('role')
-        self.classrooms.create_index('name')
-        self.sessions.create_index('session_id', unique=True)
-        self.sessions.create_index('expires_at')
-        self.sessions.create_index('class_id')
-        self.attendance.create_index([('student_id', 1), ('session_id', 1)], unique=True)
-        self.attendance.create_index('session_id')
-        self.attendance.create_index('student_id')
-        self.proxy_attempts.create_index('timestamp')
+        try:
+            self.users.create_index('email', unique=True)
+            self.users.create_index('role')
+            self.classrooms.create_index('name')
+            self.sessions.create_index('session_id', unique=True)
+            self.sessions.create_index('expires_at')
+            self.sessions.create_index('class_id')
+            self.attendance.create_index([('student_id', 1), ('session_id', 1)], unique=True)
+            self.attendance.create_index('session_id')
+            self.attendance.create_index('student_id')
+            self.proxy_attempts.create_index('timestamp')
+        except Exception as e:
+            print(f"[Database Notice] Index creation deferred or database temporarily offline: {e}")
 
 class User(UserMixin):
     def __init__(self, user_data):
@@ -71,24 +74,30 @@ class User(UserMixin):
     
     @staticmethod
     def get_by_email(db, email):
-        if not email:
+        if db is None or not email:
             return None
         import re
         clean_email = email.strip()
         pattern = re.compile('^' + re.escape(clean_email) + '$', re.IGNORECASE)
-        user_data = db.users.find_one({'email': pattern})
-        if user_data:
-            return User(user_data)
+        try:
+            user_data = db.users.find_one({'email': pattern})
+            if user_data:
+                return User(user_data)
+        except Exception as e:
+            print(f"[Database Error] get_by_email failed: {e}")
         return None
     
     @staticmethod
     def get_by_id(db, user_id):
         from bson.objectid import ObjectId
-        if not user_id or not ObjectId.is_valid(user_id):
+        if db is None or not user_id or not ObjectId.is_valid(user_id):
             return None
-        user_data = db.users.find_one({'_id': ObjectId(user_id)})
-        if user_data:
-            return User(user_data)
+        try:
+            user_data = db.users.find_one({'_id': ObjectId(user_id)})
+            if user_data:
+                return User(user_data)
+        except Exception as e:
+            print(f"[Database Error] get_by_id failed: {e}")
         return None
 
 class Classroom:

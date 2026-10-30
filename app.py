@@ -22,10 +22,14 @@ app.config['SESSION_COOKIE_SAMESITE'] = app.config.get('SESSION_COOKIE_SAMESITE'
 app.config['SESSION_COOKIE_SECURE'] = app.config.get('SESSION_COOKIE_SECURE', False)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
-# Initialize database
-db = Database(app.config['MONGO_URI'], app.config['MONGO_DB_NAME']).db
-# Attach db to app to avoid circular imports from route modules
-app.db = db
+# Initialize database with connection tolerance
+try:
+    db = Database(app.config['MONGO_URI'], app.config['MONGO_DB_NAME']).db
+    app.db = db
+except Exception as e:
+    print(f"[Database Error] Initial MongoDB connection failed: {e}")
+    db = None
+    app.db = None
 
 # Initialize Flask-Login
 login_manager = LoginManager()
@@ -46,7 +50,28 @@ app.mail = mail
 
 @login_manager.user_loader
 def load_user(user_id):
+    if db is None:
+        return None
     return User.get_by_id(db, user_id)
+
+# Health check route for cloud deployment verification
+@app.route('/health')
+@app.route('/api/health')
+def health_check():
+    db_status = "connected"
+    if app.db is None:
+        db_status = "disconnected (Verify MONGO_URI in cloud environment variables)"
+    else:
+        try:
+            app.db.command('ping')
+        except Exception as e:
+            db_status = f"unreachable: {str(e)}"
+    
+    return jsonify({
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "database": db_status,
+        "service": "GeoAttend Backend API"
+    }), 200
 
 # Register API Blueprint (REST endpoints for React frontend)
 from routes.api import api_bp
@@ -68,6 +93,9 @@ def serve_react(path):
 
 # Ensure the initial administrator account exists
 def init_admin():
+    if db is None:
+        print("[Admin Setup Notice] MongoDB not connected yet. Set MONGO_URI in environment variables.")
+        return
     try:
         admin = User.get_by_email(db, Config.ADMIN_EMAIL)
         if not admin:
