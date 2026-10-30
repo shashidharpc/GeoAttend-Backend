@@ -20,15 +20,27 @@ class Config:
     HOST = os.getenv("HOST", "0.0.0.0")
     PORT = int(os.getenv("PORT", 5000))
 
+    # ─── Environment & Mode Detection ───────────────────────────
+    is_production = (
+        os.getenv("FLASK_ENV") == "production"
+        or os.getenv("RENDER") is not None
+        or (os.getenv("PORT") is not None and os.getenv("PORT") != "5000")
+    )
+
     # ─── CORS Allowed Origins ───────────────────────────────────
+    _raw_cors = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
+    ).split(",")
     CORS_ORIGINS = [
         origin.strip()
-        for origin in os.getenv(
-            "CORS_ORIGINS",
-            "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
-        ).split(",")
+        for origin in _raw_cors
         if origin.strip()
     ]
+    # Automatically permit all Vercel deployments and Render domains
+    for _pat in [r"https://.*\.vercel\.app", r"https://.*\.onrender\.com"]:
+        if _pat not in CORS_ORIGINS:
+            CORS_ORIGINS.append(_pat)
 
     # ─── MongoDB Database Configuration ─────────────────────────
     MONGO_URI = os.getenv(
@@ -43,8 +55,14 @@ class Config:
     PERMANENT_SESSION_LIFETIME = timedelta(days=SESSION_LIFETIME_DAYS)
 
     SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "t")
-    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+    SESSION_COOKIE_SECURE = os.getenv(
+        "SESSION_COOKIE_SECURE",
+        "true" if is_production else "false"
+    ).lower() in ("true", "1", "t")
+    SESSION_COOKIE_SAMESITE = os.getenv(
+        "SESSION_COOKIE_SAMESITE",
+        "None" if is_production else "Lax"
+    )
 
     # ─── Administrator Default Credentials ──────────────────────
     ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@edu.com")

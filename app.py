@@ -20,6 +20,8 @@ CORS(
 
 app.config['SESSION_COOKIE_SAMESITE'] = app.config.get('SESSION_COOKIE_SAMESITE', 'Lax')
 app.config['SESSION_COOKIE_SECURE'] = app.config.get('SESSION_COOKIE_SECURE', False)
+if app.config.get('SESSION_COOKIE_SAMESITE') == 'None':
+    app.config['SESSION_COOKIE_SECURE'] = True
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # Initialize database with connection tolerance
