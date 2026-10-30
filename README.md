@@ -87,3 +87,4 @@ See [`.env.example`](.env.example) for all available options:
 ## License
 
 MIT License. Designed and maintained for GeoAttend.
+

@@ -68,18 +68,23 @@ def serve_react(path):
 
 # Ensure the initial administrator account exists
 def init_admin():
-    admin = User.get_by_email(db, Config.ADMIN_EMAIL)
-    if not admin:
-        admin = User.create_user(
-            db,
-            Config.ADMIN_EMAIL,
-            'Administrator',
-            Config.ADMIN_PASSWORD,
-            role='admin'
-        )
-        print("Default administrator created successfully!")
+    try:
+        admin = User.get_by_email(db, Config.ADMIN_EMAIL)
+        if not admin:
+            admin = User.create_user(
+                db,
+                Config.ADMIN_EMAIL,
+                'Administrator',
+                Config.ADMIN_PASSWORD,
+                role='admin'
+            )
+            print("Default administrator created successfully!")
+    except Exception as e:
+        print(f"Admin initialization notice: {e}")
+
+# Initialize admin account on startup (runs under both Gunicorn and direct execution)
+with app.app_context():
+    init_admin()
 
 if __name__ == '__main__':
-    with app.app_context():
-        init_admin()
     app.run(debug=Config.DEBUG, host=Config.HOST, port=Config.PORT)
