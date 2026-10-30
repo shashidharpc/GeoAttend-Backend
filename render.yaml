@@ -12,3 +12,4 @@ services:
         value: production
       - key: FLASK_DEBUG
         value: "false"
+
