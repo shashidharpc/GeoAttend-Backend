@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block title %}Scan QR Code - Student{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-lg">
+                <div class="card-header bg-primary text-white text-center py-4">
+                    <h3 class="mb-0 fw-bold">
+                        <img src="https://img.icons8.com/?size=48&id=PL3nLfWtUZXK&format=gif&color=f7f7f7" alt="scan" class="me-2">
+                        Scan QR Code
+                    </h3>
+                    <p class="mb-0 mt-2">Position the QR code within the camera frame</p>
+                </div>
+                <div class="card-body p-4">
+                    <!-- Scanner Tabs -->
+                    <ul class="nav nav-tabs mb-4" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#camera-tab">
+                                <i class="fas fa-camera me-2"></i> Use Camera
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#upload-tab">
+                                <i class="fas fa-upload me-2"></i> Upload Image
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- Camera Tab -->
+                        <div class="tab-pane fade show active" id="camera-tab">
+                            <div id="reader" class="mb-3"></div>
+                            <div class="text-center">
+                                <button id="startScan" class="btn btn-success btn-lg">
+                                    <i class="fas fa-play me-2"></i> Start Scanning
+                                </button>
+                                <button id="stopScan" class="btn btn-danger btn-lg d-none">
+                                    <i class="fas fa-stop me-2"></i> Stop Scanning
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Upload Tab -->
+                        <div class="tab-pane fade" id="upload-tab">
+                            <div class="upload-area text-center p-5 border-dashed rounded">
+                                <img src="https://img.icons8.com/fluency/96/upload.png" alt="upload" class="mb-3">
+                                <h5 class="mb-3">Upload QR Code Image</h5>
+                                <input type="file" id="qr-file" accept="image/*" class="d-none">
+                                <button class="btn btn-primary btn-lg" onclick="document.getElementById('qr-file').click()">
+                                    <i class="fas fa-file-upload me-2"></i> Choose File
+                                </button>
+                                <p class="text-muted mt-3 mb-0">Supports: JPG, PNG, GIF</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status Message -->
+                    <div id="status" class="alert d-none mt-4"></div>
+
+                    <!-- Instructions -->
+                    <div class="alert alert-info mt-4">
+                        <h6 class="fw-bold mb-2">
+                            <i class="fas fa-info-circle me-2"></i> Important:
+                        </h6>
+                        <ul class="mb-0 ps-3">
+                            <li>Allow camera and location permissions when prompted</li>
+                            <li>Make sure you are within 30 meters of the classroom</li>
+                            <li>QR codes are valid for only 2 minutes</li>
+                            <li>Scan the QR code displayed by your lecturer</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/html5-qrcode"></script>
+<script src="{{ url_for('static', filename='js/geolocation.js') }}"></script>
+<script src="{{ url_for('static', filename='js/qr-scanner.js') }}"></script>
+<script>
+// Initialize scanner when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    initAttendanceScanner();
+});
+</script>
+<script>
+let html5QrcodeScanner = null;
+let locationGranted = false;
+
+// Request location permission
+function requestLocation() {
+    return new Promise((resolve, reject) => {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    locationGranted = true;
+                    resolve({
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude
+                    });
+                },
+                (error) => {
+                    reject(error);
+                }
+            );
+        } else {
+            reject(new Error('Geolocation not supported'));
+        }
+    });
+}
+
+// Show status message
+function showStatus(message, type) {
+    const statusDiv = document.getElementById('status');
+    statusDiv.className = `alert alert-${type}`;
+    statusDiv.innerHTML = message;
+    statusDiv.classList.remove('d-none');
+}
+
+// Handle QR code scan
+async function onScanSuccess(decodedText) {
+    if (!locationGranted) {
+        showStatus('<i class="fas fa-exclamation-circle me-2"></i> Please allow location access first!', 'warning');
+        return;
+    }
+
+    // Stop scanner
+    if (html5QrcodeScanner) {
+        html5QrcodeScanner.stop();
+        document.getElementById('stopScan').classList.add('d-none');
+        document.getElementById('startScan').classList.remove('d-none');
+    }
+
+    showStatus('<i class="fas fa-spinner fa-spin me-2"></i> Verifying attendance...', 'info');
+
+    try {
+        // Get current location
+        const location = await requestLocation();
+
+        // Send to backend
+        const response = await fetch('/student/verify_attendance', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                qr_data: decodedText,
+                latitude: location.latitude,
+                longitude: location.longitude
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showStatus(`<i class="fas fa-check-circle me-2"></i> ${data.message}`, 'success');
+            setTimeout(() => {
+                window.location.href = '/student/dashboard';
+            }, 2000);
+        } else {
+            showStatus(`<i class="fas fa-times-circle me-2"></i> ${data.message}`, 'danger');
+        }
+    } catch (error) {
+        showStatus(`<i class="fas fa-exclamation-circle me-2"></i> Error: ${error.message}`, 'danger');
+    }
+}
+
+// Start camera scanning
+document.getElementById('startScan').addEventListener('click', async function() {
+    try {
+        // Request location first
+        await requestLocation();
+        showStatus('<i class="fas fa-check-circle me-2"></i> Location access granted', 'success');
+
+        // Start scanner
+        html5QrcodeScanner = new Html5Qrcode("reader");
+        
+        html5QrcodeScanner.start(
+            { facingMode: "environment" },
+            {
+                fps: 10,
+                qrbox: { width: 250, height: 250 }
+            },
+            onScanSuccess
+        );
+
+        document.getElementById('startScan').classList.add('d-none');
+        document.getElementById('stopScan').classList.remove('d-none');
+    } catch (error) {
+        showStatus(`<i class="fas fa-exclamation-circle me-2"></i> Error: ${error.message}`, 'danger');
+    }
+});
+
+// Stop camera scanning
+document.getElementById('stopScan').addEventListener('click', function() {
+    if (html5QrcodeScanner) {
+        html5QrcodeScanner.stop();
+        this.classList.add('d-none');
+        document.getElementById('startScan').classList.remove('d-none');
+    }
+});
+
+// Handle file upload
+document.getElementById('qr-file').addEventListener('change', async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+        // Request location
+        await requestLocation();
+        showStatus('<i class="fas fa-spinner fa-spin me-2"></i> Processing image...', 'info');
+
+        // Scan file
+        const html5QrCode = new Html5Qrcode("reader");
+        const decodedText = await html5QrCode.scanFile(file, true);
+        
+        await onScanSuccess(decodedText);
+    } catch (error) {
+        showStatus(`<i class="fas fa-exclamation-circle me-2"></i> Error: ${error}`, 'danger');
+    }
+});
+</script>
+{% endblock %}

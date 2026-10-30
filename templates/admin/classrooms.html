@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Classrooms - Admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2 class="fw-bold">
+                    <img src="https://img.icons8.com/fluency/48/classroom.png" alt="classroom" class="me-2">
+                    Manage Classrooms
+                </h2>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addClassroomModal">
+                    <i class="fas fa-plus me-2"></i> Add Classroom
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        {% if classrooms %}
+            {% for classroom in classrooms %}
+            <div class="col-lg-4 col-md-6">
+                <div class="card classroom-card border-0 shadow-sm h-100 hover-lift">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-3">
+                            <div>
+                                <h5 class="card-title fw-bold mb-1">{{ classroom.name }}</h5>
+                                <small class="text-muted">
+                                    <i class="fas fa-calendar me-1"></i>
+                                    Created: {{ classroom.created_at|datetime }}
+                                </small>
+                            </div>
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-light" data-bs-toggle="dropdown">
+                                    <i class="fas fa-ellipsis-v"></i>
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="viewLocation({{ classroom.latitude }}, {{ classroom.longitude }})">
+                                            <i class="fas fa-map-marker-alt me-2"></i> View Location
+                                        </a>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="location-info bg-light p-3 rounded mb-3">
+                            <div class="d-flex align-items-center mb-2">
+                                <img src="https://img.icons8.com/fluency/32/marker.png" alt="location" class="me-2">
+                                <span class="fw-semibold">Location Details</span>
+                            </div>
+                            <div class="small">
+                                <div class="mb-1">
+                                    <span class="text-muted">Latitude:</span>
+                                    <code>{{ classroom.latitude }}</code>
+                                </div>
+                                <div>
+                                    <span class="text-muted">Longitude:</span>
+                                    <code>{{ classroom.longitude }}</code>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid">
+                            <a href="{{ url_for('admin.generate_qr', classroom_id=classroom._id) }}" 
+                               class="btn btn-primary">
+                                <i class="fas fa-qrcode me-2"></i> Generate QR Code
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center py-5">
+                    <img src="https://img.icons8.com/fluency/96/empty-box.png" alt="empty">
+                    <h5 class="mt-3 mb-2">No Classrooms Yet</h5>
+                    <p class="text-muted">Create your first classroom to get started</p>
+                    <button class="btn btn-primary mt-3" data-bs-toggle="modal" data-bs-target="#addClassroomModal">
+                        <i class="fas fa-plus me-2"></i> Add Classroom
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Add Classroom Modal -->
+<div class="modal fade" id="addClassroomModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-plus-circle me-2"></i> Add New Classroom
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">
+                            <i class="fas fa-door-open me-2 text-primary"></i>Classroom Name
+                        </label>
+                        <input type="text" name="name" class="form-control" 
+                               placeholder="e.g., Room 101, Lab A" required>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Get Your Location:</strong> Click the button below to automatically fetch your current GPS coordinates.
+                    </div>
+
+                    <div class="text-center mb-3">
+                        <button type="button" class="btn btn-success" onclick="getCurrentLocation()">
+                            <i class="fas fa-location-arrow me-2"></i> Get Current Location
+                        </button>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">
+                                <i class="fas fa-map-marker-alt me-2 text-primary"></i>Latitude
+                            </label>
+                            <input type="number" step="any" name="latitude" id="latitude" 
+                                   class="form-control" placeholder="e.g., 40.7128" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">
+                                <i class="fas fa-map-marker-alt me-2 text-primary"></i>Longitude
+                            </label>
+                            <input type="number" step="any" name="longitude" id="longitude" 
+                                   class="form-control" placeholder="e.g., -74.0060" required>
+                        </div>
+                    </div>
+
+                    <div id="locationStatus" class="alert d-none"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-2"></i> Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-2"></i> Save Classroom
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/geolocation.js') }}"></script>
+<script>
+async function getCurrentLocation() {
+    try {
+        const location = await getGeolocation();
+        fillLocationInputs(location.latitude, location.longitude);
+    } catch (error) {
+        showLocationStatus(error.message, 'danger');
+    }
+}
+
+function viewLocation(lat, lng) {
+    openInGoogleMaps(lat, lng);
+}
+
+function viewLocation(lat, lng) {
+    window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
+}
+</script>
+{% endblock %}

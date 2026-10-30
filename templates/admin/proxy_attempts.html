@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Proxy Attempts - Admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="fw-bold">
+                <img src="https://img.icons8.com/?size=48&id=ZdthOWHeUPYa&format=png" alt="security" class="me-2">
+                Proxy Attempts Log
+            </h2>
+            <p class="text-muted mb-0">Monitor and track suspicious attendance activities</p>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            {% if attempts %}
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>{{ attempts|length }}</strong> proxy attempts detected
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-light">
+                        <tr>
+                            <th>#</th>
+                            <th>Student</th>
+                            <th>Classroom</th>
+                            <th>Reason</th>
+                            <th>Timestamp</th>
+                            <th>Location</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for attempt in attempts %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>
+                                <div>
+                                    <strong>{{ attempt.student_name }}</strong>
+                                    <br><small class="text-muted">{{ attempt.student_email }}</small>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge bg-info">{{ attempt.classroom_name }}</span>
+                            </td>
+                            <td>
+                                <span class="badge bg-danger">
+                                    {{ attempt.reason }}
+                                </span>
+                            </td>
+                            <td>{{ attempt.timestamp|datetime }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" 
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#locationModal"
+                                        data-scanned-lat="{{ attempt.scanned_location.latitude }}"
+                                        data-scanned-lng="{{ attempt.scanned_location.longitude }}"
+                                        data-expected-lat="{{ attempt.expected_location.latitude }}"
+                                        data-expected-lng="{{ attempt.expected_location.longitude }}">
+                                    <i class="fas fa-map-marker-alt"></i> View
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-5">
+                <img src="https://img.icons8.com/fluency/96/security-checked.png" alt="secure">
+                <h5 class="mt-3 mb-2 text-success">No Proxy Attempts!</h5>
+                <p class="text-muted">All attendance attempts are legitimate.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Location Modal -->
+<div class="modal fade" id="locationModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-map-marker-alt me-2"></i> Location Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <h6 class="fw-bold text-danger">Scanned Location:</h6>
+                    <p id="scannedLoc" class="mb-0"></p>
+                    <a id="scannedLink" href="javascript:void(0)" target="_blank" class="btn btn-sm btn-outline-primary mt-2">
+                        <i class="fas fa-external-link-alt me-1"></i> Open in Google Maps
+                    </a>
+                </div>
+                <hr>
+                <div>
+                    <h6 class="fw-bold text-success">Expected Location:</h6>
+                    <p id="expectedLoc" class="mb-0"></p>
+                    <a id="expectedLink" href="javascript:void(0)" target="_blank" class="btn btn-sm btn-outline-success mt-2">
+                        <i class="fas fa-external-link-alt me-1"></i> Open in Google Maps
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Handle location modal
+document.addEventListener('DOMContentLoaded', function() {
+    const locationModal = document.getElementById('locationModal');
+    if (locationModal) {
+        locationModal.addEventListener('show.bs.modal', function(event) {
+            const button = event.relatedTarget;
+            const scannedLat = button.getAttribute('data-scanned-lat');
+            const scannedLng = button.getAttribute('data-scanned-lng');
+            const expectedLat = button.getAttribute('data-expected-lat');
+            const expectedLng = button.getAttribute('data-expected-lng');
+            
+            // Update text content
+            document.getElementById('scannedLoc').textContent = 
+                `Latitude: ${scannedLat}, Longitude: ${scannedLng}`;
+            document.getElementById('expectedLoc').textContent = 
+                `Latitude: ${expectedLat}, Longitude: ${expectedLng}`;
+            
+            // Add click handlers to open maps
+            const scannedLink = document.getElementById('scannedLink');
+            const expectedLink = document.getElementById('expectedLink');
+            
+            scannedLink.onclick = function(e) {
+                e.preventDefault();
+                window.open(`https://www.google.com/maps?q=${scannedLat},${scannedLng}`, '_blank');
+            };
+            
+            expectedLink.onclick = function(e) {
+                e.preventDefault();
+                window.open(`https://www.google.com/maps?q=${expectedLat},${expectedLng}`, '_blank');
+            };
+        });
+    }
+});
+</script>
+{% endblock %}

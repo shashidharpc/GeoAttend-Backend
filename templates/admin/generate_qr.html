@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Generate QR Code - Admin{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-lg">
+                <div class="card-header bg-primary text-white text-center py-4">
+                    <h3 class="mb-0 fw-bold">
+                        <img src="https://img.icons8.com/fluency/48/qr-code--v1.png" alt="qr" class="me-2">
+                        QR Code Generated
+                    </h3>
+                    <p class="mb-0 mt-2">{{ classroom.name }}</p>
+                </div>
+                <div class="card-body p-5">
+                    <!-- QR Code Display -->
+                    <div class="text-center mb-4">
+                        <div class="qr-code-container mb-3">
+                            <img src="{{ qr_code }}" alt="QR Code" class="img-fluid shadow-lg rounded" 
+                                 style="max-width: 400px;">
+                        </div>
+                        
+                        <div class="alert alert-warning">
+                            <i class="fas fa-clock me-2"></i>
+                            <strong>QR Code expires in 2 minutes!</strong>
+                            <div id="countdown" class="mt-2 fs-4 fw-bold text-danger"></div>
+                        </div>
+                    </div>
+
+                    <!-- Session Details -->
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="info-card p-3 bg-light rounded">
+                                <small class="text-muted d-block mb-1">Session ID</small>
+                                <code class="fs-6">{{ session.session_id[:16] }}...</code>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="info-card p-3 bg-light rounded">
+                                <small class="text-muted d-block mb-1">Classroom</small>
+                                <strong>{{ classroom.name }}</strong>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="info-card p-3 bg-light rounded">
+                                <small class="text-muted d-block mb-1">Created At</small>
+                                <strong>{{ session.created_at|datetime }}</strong>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="info-card p-3 bg-light rounded">
+                                <small class="text-muted d-block mb-1">Expires At</small>
+                                <strong class="text-danger">{{ session.expires_at|datetime }}</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Instructions -->
+                    <div class="alert alert-info mt-4">
+                        <h6 class="fw-bold mb-2">
+                            <i class="fas fa-info-circle me-2"></i>Instructions for Students:
+                        </h6>
+                        <ol class="mb-0 ps-3">
+                            <li>Open the attendance system and login</li>
+                            <li>Navigate to "Scan QR" page</li>
+                            <li>Allow camera and location permissions</li>
+                            <li>Scan this QR code or upload image</li>
+                            <li>Attendance will be marked if within 30m radius</li>
+                        </ol>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="d-grid gap-2 mt-4">
+                        <a href="{{ url_for('admin.attendance_report', session_id=session.session_id) }}" 
+                           class="btn btn-success btn-lg">
+                            <i class="fas fa-chart-bar me-2"></i> View Attendance Report
+                        </a>
+                        <a href="{{ url_for('admin.classrooms') }}" class="btn btn-secondary btn-lg">
+                            <i class="fas fa-arrow-left me-2"></i> Back to Classrooms
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Countdown timer
+const expiresAt = new Date("{{ session.expires_at.isoformat() }}");
+
+function updateCountdown() {
+    const now = new Date();
+    const diff = expiresAt - now;
+    
+    if (diff <= 0) {
+        document.getElementById('countdown').innerHTML = 
+            '<span class="text-danger">EXPIRED</span>';
+        return;
+    }
+    
+    const minutes = Math.floor(diff / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    
+    document.getElementById('countdown').innerHTML = 
+        `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+setInterval(updateCountdown, 1000);
+updateCountdown();
+</script>
+{% endblock %}
