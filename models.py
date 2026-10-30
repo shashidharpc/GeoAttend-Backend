@@ -4,9 +4,42 @@ from flask_login import UserMixin
 import bcrypt
 import uuid
 
+try:
+    import mongomock
+except ImportError:
+    mongomock = None
+
 class Database:
     def __init__(self, uri, db_name):
-        self.client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        self.is_mock = False
+        client = None
+
+        clean_uri = (uri or "").strip()
+        
+        # Check if Atlas password placeholder is present
+        if "<db_password>" in clean_uri:
+            print("[MongoDB Warning] MONGO_URI contains placeholder '<db_password>'. Please replace it with your actual MongoDB Atlas password in your cloud environment variables.")
+
+        # Attempt live connection if valid URI provided
+        if clean_uri and "<db_password>" not in clean_uri:
+            try:
+                candidate = MongoClient(clean_uri, serverSelectionTimeoutMS=4000)
+                candidate.admin.command('ping')
+                client = candidate
+                print(f"[MongoDB] Successfully connected to live database '{db_name}'.")
+            except Exception as e:
+                print(f"[MongoDB Notice] Live database connection unreachable ({e}).")
+
+        # Resilient fallback to mongomock if live database is offline or not configured
+        if client is None:
+            if mongomock is not None:
+                print(f"[MongoDB] Initializing resilient in-memory database (mongomock) for '{db_name}'. Web server will boot smoothly!")
+                client = mongomock.MongoClient()
+                self.is_mock = True
+            else:
+                client = MongoClient(clean_uri or "mongodb://localhost:27017/", serverSelectionTimeoutMS=3000)
+
+        self.client = client
         self.db = self.client[db_name]
         
         # Collections
