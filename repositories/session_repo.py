@@ -140,3 +140,4 @@ class SessionRepository:
                     doc.reference.update({'is_active': False})
         except Exception as e:
             print(f"[SessionRepository Notice] Session auto-expiration check: {e}")
+

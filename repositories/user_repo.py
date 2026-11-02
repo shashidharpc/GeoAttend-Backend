@@ -150,3 +150,4 @@ class UserRepository:
             return len(list(self.col.stream()))
         except Exception:
             return 0
+
