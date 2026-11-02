@@ -1,284 +1,147 @@
-from pymongo import MongoClient
+"""
+Application Models & Database Interface
+Provides model wrappers for Flask-Login, User management, Classrooms,
+Ephemeral Sessions, Attendance marking, and Anti-Proxy auditing.
+Powered by the Firestore repository layer.
+"""
 from datetime import datetime, timedelta
 from flask_login import UserMixin
-import bcrypt
-import uuid
-
-try:
-    import mongomock
-except ImportError:
-    mongomock = None
+from repositories import firestore_service
 
 class Database:
-    def __init__(self, uri, db_name):
-        self.is_mock = False
-        client = None
+    """
+    Database compatibility layer wrapping FirestoreService.
+    Provides direct repository access:
+    db.users, db.classrooms, db.sessions, db.attendance, db.proxy_attempts
+    """
+    def __init__(self, *args, **kwargs):
+        self.service = firestore_service
+        self.is_mock = self.service.is_mock
+        self.client = self.service.client
+        self.db = self
 
-        clean_uri = (uri or "").strip()
-        
-        # Check if Atlas password placeholder is present
-        if "<db_password>" in clean_uri:
-            print("[MongoDB Warning] MONGO_URI contains placeholder '<db_password>'. Please replace it with your actual MongoDB Atlas password in your cloud environment variables.")
+        self.users = self.service.users
+        self.classrooms = self.service.classrooms
+        self.sessions = self.service.sessions
+        self.attendance = self.service.attendance
+        self.proxy_attempts = self.service.proxy_attempts
 
-        # Attempt live connection if valid URI provided
-        if clean_uri and "<db_password>" not in clean_uri:
-            try:
-                candidate = MongoClient(clean_uri, serverSelectionTimeoutMS=4000)
-                candidate.admin.command('ping')
-                client = candidate
-                print(f"[MongoDB] Successfully connected to live database '{db_name}'.")
-            except Exception as e:
-                print(f"[MongoDB Notice] Live database connection unreachable ({e}).")
+    def command(self, cmd):
+        """Simulates database ping for healthcheck verification"""
+        ok, msg = self.service.ping()
+        if not ok:
+            raise Exception(msg)
+        return {'ok': 1.0}
 
-        # Resilient fallback to mongomock if live database is offline or not configured
-        if client is None:
-            if mongomock is not None:
-                print(f"[MongoDB] Initializing resilient in-memory database (mongomock) for '{db_name}'. Web server will boot smoothly!")
-                client = mongomock.MongoClient()
-                self.is_mock = True
-            else:
-                client = MongoClient(clean_uri or "mongodb://localhost:27017/", serverSelectionTimeoutMS=3000)
-
-        self.client = client
-        self.db = self.client[db_name]
-        
-        # Collections
-        self.users = self.db.users
-        self.classrooms = self.db.classrooms
-        self.sessions = self.db.sessions
-        self.attendance = self.db.attendance
-        self.proxy_attempts = self.db.proxy_attempts
-        
-        # Create indexes with error tolerance
-        self._create_indexes()
-    
-    def _create_indexes(self):
-        try:
-            self.users.create_index('email', unique=True)
-            self.users.create_index('role')
-            self.classrooms.create_index('name')
-            self.sessions.create_index('session_id', unique=True)
-            self.sessions.create_index('expires_at')
-            self.sessions.create_index('class_id')
-            self.attendance.create_index([('student_id', 1), ('session_id', 1)], unique=True)
-            self.attendance.create_index('session_id')
-            self.attendance.create_index('student_id')
-            self.proxy_attempts.create_index('timestamp')
-        except Exception as e:
-            print(f"[Database Notice] Index creation deferred or database temporarily offline: {e}")
 
 class User(UserMixin):
     def __init__(self, user_data):
-        self.id = str(user_data['_id'])
-        self.email = user_data['email']
-        self.name = user_data['name']
-        self.role = user_data['role']
+        self.id = str(user_data.get('id') or user_data.get('_id'))
+        self.email = user_data.get('email')
+        self.name = user_data.get('name')
+        self.role = user_data.get('role', 'student')
         self.class_id = user_data.get('class_id')
         self.created_at = user_data.get('created_at')
-    
+
     @staticmethod
     def hash_password(password):
-        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    
+        return firestore_service.users.hash_password(password)
+
     @staticmethod
     def verify_password(password, hashed):
-        if not password or not hashed:
-            return False
-        try:
-            if isinstance(hashed, str):
-                hashed = hashed.encode('utf-8')
-            return bcrypt.checkpw(password.encode('utf-8'), bytes(hashed))
-        except Exception:
-            return False
-    
+        return firestore_service.users.verify_password(password, hashed)
+
     @staticmethod
     def create_user(db, email, name, password, role='student', class_id=None):
-        user_data = {
-            'email': email,
-            'name': name,
-            'password': User.hash_password(password),
-            'role': role,
-            'class_id': class_id,
-            'created_at': datetime.utcnow()
-        }
-        result = db.users.insert_one(user_data)
-        user_data['_id'] = result.inserted_id
-        return User(user_data)
-    
+        data = firestore_service.users.create_user(
+            email=email,
+            name=name,
+            password=password,
+            role=role,
+            class_id=class_id
+        )
+        return User(data)
+
     @staticmethod
     def get_by_email(db, email):
-        if db is None or not email:
-            return None
-        import re
-        clean_email = email.strip()
-        pattern = re.compile('^' + re.escape(clean_email) + '$', re.IGNORECASE)
-        try:
-            user_data = db.users.find_one({'email': pattern})
-            if user_data:
-                return User(user_data)
-        except Exception as e:
-            print(f"[Database Error] get_by_email failed: {e}")
-        return None
-    
+        data = firestore_service.users.get_by_email(email)
+        return User(data) if data else None
+
     @staticmethod
     def get_by_id(db, user_id):
-        from bson.objectid import ObjectId
-        if db is None or not user_id or not ObjectId.is_valid(user_id):
-            return None
-        try:
-            user_data = db.users.find_one({'_id': ObjectId(user_id)})
-            if user_data:
-                return User(user_data)
-        except Exception as e:
-            print(f"[Database Error] get_by_id failed: {e}")
-        return None
+        data = firestore_service.users.get_by_id(user_id)
+        return User(data) if data else None
+
 
 class Classroom:
     @staticmethod
     def create(db, name, latitude, longitude, created_by):
-        classroom_data = {
-            'name': name,
-            'latitude': float(latitude),
-            'longitude': float(longitude),
-            'created_by': created_by,
-            'created_at': datetime.utcnow()
-        }
-        result = db.classrooms.insert_one(classroom_data)
-        classroom_data['_id'] = result.inserted_id
-        return classroom_data
-    
+        return firestore_service.classrooms.create(name, latitude, longitude, created_by)
+
     @staticmethod
     def update(db, classroom_id, name=None, latitude=None, longitude=None):
-        from bson.objectid import ObjectId
-        if not classroom_id:
-            return None
-        query = {'_id': ObjectId(classroom_id)} if ObjectId.is_valid(classroom_id) else {'_id': classroom_id}
-        update_data = {}
-        if name is not None and str(name).strip():
-            update_data['name'] = str(name).strip()
-        if latitude is not None and str(latitude).strip():
-            update_data['latitude'] = float(latitude)
-        if longitude is not None and str(longitude).strip():
-            update_data['longitude'] = float(longitude)
-        if update_data:
-            update_data['updated_at'] = datetime.utcnow()
-            db.classrooms.update_one(query, {'$set': update_data})
-        return Classroom.get_by_id(db, classroom_id)
+        return firestore_service.classrooms.update(classroom_id, name=name, latitude=latitude, longitude=longitude)
 
     @staticmethod
     def delete(db, classroom_id):
-        from bson.objectid import ObjectId
-        if not classroom_id:
-            return False
-        query = {'_id': ObjectId(classroom_id)} if ObjectId.is_valid(classroom_id) else {'_id': classroom_id}
-        res = db.classrooms.delete_one(query)
-        return res.deleted_count > 0
+        return firestore_service.classrooms.delete(classroom_id)
 
     @staticmethod
     def get_all(db):
-        return list(db.classrooms.find())
-    
+        return firestore_service.classrooms.get_all()
+
     @staticmethod
     def get_by_id(db, classroom_id):
-        from bson.objectid import ObjectId
-        if not classroom_id:
-            return None
-        if ObjectId.is_valid(classroom_id):
-            found = db.classrooms.find_one({'_id': ObjectId(classroom_id)})
-            if found:
-                return found
-        return db.classrooms.find_one({'_id': classroom_id})
+        return firestore_service.classrooms.get_by_id(classroom_id)
+
 
 class Session:
     @staticmethod
     def create(db, class_id, created_by, expiry_minutes=2):
-        session_data = {
-            'session_id': str(uuid.uuid4()),
-            'class_id': class_id,
-            'random_token': uuid.uuid4().hex,
-            'created_by': created_by,
-            'created_at': datetime.utcnow(),
-            'expires_at': datetime.utcnow() + timedelta(minutes=expiry_minutes),
-            'is_active': True
-        }
-        db.sessions.insert_one(session_data)
-        return session_data
-    
+        return firestore_service.sessions.create(class_id, created_by, expiry_minutes=expiry_minutes)
+
     @staticmethod
     def get_by_session_id(db, session_id):
-        return db.sessions.find_one({'session_id': session_id})
-    
+        return firestore_service.sessions.get_by_session_id(session_id)
+
     @staticmethod
     def is_valid(session):
-        if not session or not session.get('is_active'):
-            return False, "Invalid session"
-        
-        if datetime.utcnow() > session['expires_at']:
-            return False, "QR code expired"
-        
-        return True, "Valid"
-    
+        return firestore_service.sessions.is_valid(session)
+
     @staticmethod
     def deactivate(db, session_id):
-        db.sessions.update_one(
-            {'session_id': session_id},
-            {'$set': {'is_active': False}}
-        )
+        return firestore_service.sessions.deactivate(session_id)
+
 
 class Attendance:
     @staticmethod
     def mark(db, student_id, session_id, latitude, longitude):
-        attendance_data = {
-            'student_id': student_id,
-            'session_id': session_id,
-            'latitude': latitude,
-            'longitude': longitude,
-            'marked_at': datetime.utcnow()
-        }
-        try:
-            db.attendance.insert_one(attendance_data)
-            return True
-        except:
-            return False
-    
+        return firestore_service.attendance.mark(student_id, session_id, latitude, longitude)
+
     @staticmethod
     def get_by_session(db, session_id):
-        return list(db.attendance.find({'session_id': session_id}))
-    
+        return firestore_service.attendance.get_by_session(session_id)
+
     @staticmethod
     def get_by_student(db, student_id):
-        return list(db.attendance.find({'student_id': student_id}))
-    
+        return firestore_service.attendance.get_by_student(student_id)
+
     @staticmethod
     def check_already_marked(db, student_id, session_id):
-        return db.attendance.find_one({
-            'student_id': student_id,
-            'session_id': session_id
-        }) is not None
+        return firestore_service.attendance.check_already_marked(student_id, session_id)
+
 
 class ProxyAttempt:
     @staticmethod
     def log(db, student_id, session_id, latitude, longitude, expected_lat, expected_lng, reason):
-        attempt_data = {
-            'student_id': student_id,
-            'session_id': session_id,
-            'scanned_location': {
-                'latitude': latitude,
-                'longitude': longitude
-            },
-            'expected_location': {
-                'latitude': expected_lat,
-                'longitude': expected_lng
-            },
-            'reason': reason,
-            'timestamp': datetime.utcnow()
-        }
-        db.proxy_attempts.insert_one(attempt_data)
-    
+        return firestore_service.proxy_attempts.log(
+            student_id, session_id, latitude, longitude, expected_lat, expected_lng, reason
+        )
+
     @staticmethod
     def get_all(db):
-        return list(db.proxy_attempts.find().sort('timestamp', -1))
-    
+        return firestore_service.proxy_attempts.get_all()
+
     @staticmethod
     def get_by_session(db, session_id):
-        return list(db.proxy_attempts.find({'session_id': session_id}))
+        return firestore_service.proxy_attempts.get_by_session(session_id)

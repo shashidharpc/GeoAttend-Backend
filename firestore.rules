@@ -1,0 +1,37 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // GeoAttend Firestore Security Rules
+    // All operational data modifications and geofence validations are securely
+    // processed server-side through the Python Flask backend via Firebase Admin SDK.
+    // Direct client access from untrusted frontends is blocked by default.
+    // =========================================================================
+
+    match /users/{userId} {
+      allow read, write: if false;
+    }
+
+    match /classrooms/{classroomId} {
+      allow read, write: if false;
+    }
+
+    match /sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /attendance/{attendanceId} {
+      allow read, write: if false;
+    }
+
+    match /proxy_attempts/{attemptId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -26,10 +26,10 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # Initialize database with connection tolerance
 try:
-    db = Database(app.config['MONGO_URI'], app.config['MONGO_DB_NAME']).db
+    db = Database()
     app.db = db
 except Exception as e:
-    print(f"[Database Error] Initial MongoDB connection failed: {e}")
+    print(f"[Database Error] Initial database initialization failed: {e}")
     db = None
     app.db = None
 
@@ -62,7 +62,7 @@ def load_user(user_id):
 def health_check():
     db_status = "connected"
     if app.db is None:
-        db_status = "disconnected (Verify MONGO_URI in cloud environment variables)"
+        db_status = "disconnected"
     else:
         try:
             app.db.command('ping')
@@ -70,8 +70,9 @@ def health_check():
             db_status = f"unreachable: {str(e)}"
     
     return jsonify({
-        "status": "healthy" if db_status == "connected" else "degraded",
+        "status": "healthy" if "connected" in db_status else "degraded",
         "database": db_status,
+        "database_type": "firestore",
         "service": "GeoAttend Backend API"
     }), 200
 
@@ -102,7 +103,7 @@ def serve_react(path):
 # Ensure the initial administrator account exists
 def init_admin():
     if db is None:
-        print("[Admin Setup Notice] MongoDB not connected yet. Set MONGO_URI in environment variables.")
+        print("[Admin Setup Notice] Database not initialized yet.")
         return
     try:
         admin = User.get_by_email(db, Config.ADMIN_EMAIL)

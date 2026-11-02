@@ -1,6 +1,12 @@
 from flask import Blueprint, request, jsonify, current_app, make_response
 from flask_login import login_user, logout_user, login_required, current_user
-from bson.objectid import ObjectId
+try:
+    from bson.objectid import ObjectId
+except ImportError:
+    class ObjectId(str):
+        @staticmethod
+        def is_valid(val):
+            return bool(val and str(val).strip())
 import json
 import csv
 from io import StringIO
@@ -11,7 +17,7 @@ from utils import generate_qr_code, generate_random_password, calculate_distance
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 def serialize_doc(doc):
-    """Convert MongoDB document to JSON-serializable dict"""
+    """Convert database document to JSON-serializable dict"""
     if doc is None:
         return None
     if isinstance(doc, list):
@@ -21,6 +27,8 @@ def serialize_doc(doc):
         for k, v in doc.items():
             if isinstance(v, ObjectId):
                 new_doc[k] = str(v)
+            elif hasattr(v, 'latitude') and hasattr(v, 'longitude') and not isinstance(v, dict):
+                new_doc[k] = {'latitude': float(v.latitude), 'longitude': float(v.longitude)}
             elif isinstance(v, datetime):
                 iso_str = v.isoformat()
                 if not iso_str.endswith('Z') and '+' not in iso_str and '-' not in iso_str[10:]:
@@ -66,7 +74,7 @@ def api_login():
     if not user:
         return jsonify({'success': False, 'message': 'Invalid email or password'}), 401
 
-    user_data = db.users.find_one({'_id': ObjectId(user.id)})
+    user_data = db.users.get_by_id(user.id)
     if not user_data:
         return jsonify({'success': False, 'message': 'Invalid email or password'}), 401
 
@@ -106,30 +114,27 @@ def admin_dashboard():
     now = datetime.utcnow()
 
     # Update expired sessions
-    db.sessions.update_many(
-        {'is_active': True, 'expires_at': {'$lt': now}},
-        {'$set': {'is_active': False}}
-    )
+    db.sessions.expire_past_sessions()
 
-    total_students = db.users.count_documents({'role': 'student'})
-    total_classrooms = db.classrooms.count_documents({})
-    total_sessions = db.sessions.count_documents({})
-    total_proxy_attempts = db.proxy_attempts.count_documents({})
+    total_students = db.users.count_students()
+    total_classrooms = db.classrooms.count()
+    total_sessions = db.sessions.count()
+    total_proxy_attempts = db.proxy_attempts.count()
 
-    recent_sessions = list(db.sessions.find().sort('created_at', -1).limit(6))
+    recent_sessions = db.sessions.get_recent(6)
     for s in recent_sessions:
-        cls = db.classrooms.find_one({'_id': ObjectId(s['class_id'])}) if ObjectId.is_valid(s.get('class_id', '')) else None
+        cls = db.classrooms.get_by_id(s.get('class_id'))
         s['classroom_name'] = cls['name'] if cls else 'General Class'
-        s['attendance_count'] = db.attendance.count_documents({'session_id': s['session_id']})
+        s['attendance_count'] = db.attendance.count_for_session(s['session_id'])
 
     # Classroom attendance stats
-    classrooms = list(db.classrooms.find())
+    classrooms = db.classrooms.get_all()
     classroom_stats = []
     for c in classrooms:
-        cid_str = str(c['_id'])
-        c_sessions = list(db.sessions.find({'class_id': cid_str}))
+        cid_str = c['id']
+        c_sessions = db.sessions.get_by_classroom(cid_str)
         c_session_ids = [s['session_id'] for s in c_sessions]
-        count = db.attendance.count_documents({'session_id': {'$in': c_session_ids}})
+        count = db.attendance.count_for_sessions(c_session_ids)
         classroom_stats.append({
             'id': cid_str,
             'name': c.get('name', 'Unnamed'),
@@ -144,15 +149,22 @@ def admin_dashboard():
         day_date = today - timedelta(days=i)
         start_of_day = datetime(day_date.year, day_date.month, day_date.day)
         end_of_day = start_of_day + timedelta(days=1)
-        count = db.attendance.count_documents({
-            'marked_at': {'$gte': start_of_day, '$lt': end_of_day}
-        })
+        count = 0
+        for doc in db.attendance.col.stream():
+            d = doc.to_dict()
+            marked = d.get('marked_at')
+            if marked:
+                # Handle tzinfo if present
+                if hasattr(marked, 'tzinfo') and marked.tzinfo is not None:
+                    marked = marked.replace(tzinfo=None)
+                if start_of_day <= marked < end_of_day:
+                    count += 1
         dates.append(day_date.strftime('%b %d'))
         attendance_counts.append(count)
 
     # Proxy reasons breakdown
     proxy_reasons = {}
-    for attempt in db.proxy_attempts.find():
+    for attempt in db.proxy_attempts.get_all():
         reason = attempt.get('reason', 'Unknown')
         proxy_reasons[reason] = proxy_reasons.get(reason, 0) + 1
 
@@ -194,11 +206,11 @@ def admin_classrooms():
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)}), 500
 
-    classrooms = list(db.classrooms.find().sort('created_at', -1))
+    classrooms = db.classrooms.get_all()
     for c in classrooms:
-        cid = str(c['_id'])
-        c['student_count'] = db.users.count_documents({'role': 'student', 'class_id': cid})
-        c['session_count'] = db.sessions.count_documents({'class_id': cid})
+        cid = c['id']
+        c['student_count'] = db.users.count_students(class_id=cid)
+        c['session_count'] = db.sessions.count(class_id=cid)
 
     return jsonify({'classrooms': serialize_doc(classrooms)})
 
@@ -209,7 +221,7 @@ def admin_manage_classroom(classroom_id):
         return jsonify({'error': 'Unauthorized'}), 403
 
     db = current_app.db
-    if not ObjectId.is_valid(classroom_id):
+    if not classroom_id:
         return jsonify({'success': False, 'message': 'Invalid Classroom ID'}), 400
 
     if request.method == 'DELETE':
@@ -298,17 +310,17 @@ def admin_students():
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)}), 500
 
-    students = list(db.users.find({'role': 'student'}).sort('created_at', -1))
+    students = db.users.get_students()
     # Enrich student classroom name
     for s in students:
-        if s.get('class_id') and ObjectId.is_valid(s['class_id']):
-            cls = db.classrooms.find_one({'_id': ObjectId(s['class_id'])})
+        if s.get('class_id'):
+            cls = db.classrooms.get_by_id(s['class_id'])
             s['classroom_name'] = cls['name'] if cls else 'Unassigned'
         else:
             s['classroom_name'] = 'Unassigned'
         s.pop('password', None)
 
-    classrooms = list(db.classrooms.find())
+    classrooms = db.classrooms.get_all()
     return jsonify({
         'students': serialize_doc(students),
         'classrooms': serialize_doc(classrooms)
@@ -367,7 +379,7 @@ def admin_import_students():
                 continue
 
             # Resolve classroom by name
-            classroom = db.classrooms.find_one({'name': class_name})
+            classroom = db.classrooms.get_by_name(class_name)
             if not classroom:
                 errors.append(f'{email}: classroom "{class_name}" not found')
                 skipped += 1
@@ -378,7 +390,7 @@ def admin_import_students():
                 skipped += 1
                 continue
 
-            User.create_user(db, email, name, password, role='student', class_id=str(classroom['_id']))
+            User.create_user(db, email, name, password, role='student', class_id=str(classroom['id']))
 
             # Send credentials email
             try:
@@ -477,12 +489,12 @@ def admin_manage_student(student_id):
         return jsonify({'error': 'Unauthorized'}), 403
 
     db = current_app.db
-    if not ObjectId.is_valid(student_id):
+    if not student_id:
         return jsonify({'success': False, 'message': 'Invalid ID'}), 400
 
     if request.method == 'DELETE':
-        result = db.users.delete_one({'_id': ObjectId(student_id), 'role': 'student'})
-        if result.deleted_count > 0:
+        deleted = db.users.delete_user(student_id)
+        if deleted:
             return jsonify({'success': True, 'message': 'Student deleted successfully'})
         return jsonify({'success': False, 'message': 'Student not found'}), 404
 
@@ -493,8 +505,8 @@ def admin_manage_student(student_id):
         update_fields['name'] = data['name'].strip()
     if 'email' in data and data['email'].strip():
         new_email = data['email'].strip()
-        existing = db.users.find_one({'email': new_email, '_id': {'$ne': ObjectId(student_id)}})
-        if existing:
+        existing = db.users.get_by_email(new_email)
+        if existing and existing['id'] != str(student_id):
             return jsonify({'success': False, 'message': 'Email already in use by another student'}), 400
         update_fields['email'] = new_email
     if 'class_id' in data:
@@ -503,7 +515,7 @@ def admin_manage_student(student_id):
     if not update_fields:
         return jsonify({'success': False, 'message': 'No update data provided'}), 400
 
-    db.users.update_one({'_id': ObjectId(student_id)}, {'$set': update_fields})
+    db.users.update_user(student_id, update_fields)
     return jsonify({'success': True, 'message': 'Student record updated successfully'})
 
 
@@ -516,7 +528,7 @@ def update_user_profile():
     if not name:
         return jsonify({'success': False, 'message': 'Name cannot be empty'}), 400
     db = current_app.db
-    db.users.update_one({'_id': ObjectId(current_user.id)}, {'$set': {'name': name}})
+    db.users.update_user(current_user.id, {'name': name})
     return jsonify({'success': True, 'message': 'Profile name updated successfully', 'name': name})
 
 @api_bp.route('/admin/generate_qr', methods=['POST'])
@@ -574,7 +586,7 @@ def admin_attendance_report(session_id):
 
     attendance_details = []
     for att in attendances:
-        student = db.users.find_one({'_id': ObjectId(att['student_id'])}) if ObjectId.is_valid(att['student_id']) else None
+        student = db.users.get_by_id(att['student_id'])
         if student:
             dist = 0
             if classroom:
@@ -589,13 +601,13 @@ def admin_attendance_report(session_id):
                 'distance': round(dist, 1)
             })
 
-    all_students = list(db.users.find({'role': 'student', 'class_id': session['class_id']}))
+    all_students = db.users.get_students(class_id=session.get('class_id'))
     attended_ids = [att['student_id'] for att in attendances]
     absent_students = []
     for s in all_students:
-        if str(s['_id']) not in attended_ids:
+        if s['id'] not in attended_ids:
             absent_students.append({
-                'student_id': str(s['_id']),
+                'student_id': s['id'],
                 'name': s.get('name'),
                 'email': s.get('email')
             })
@@ -625,9 +637,9 @@ def admin_proxy_attempts():
 
     enriched = []
     for attempt in attempts:
-        student = db.users.find_one({'_id': ObjectId(attempt['student_id'])}) if ObjectId.is_valid(attempt['student_id']) else None
-        session = Session.get_by_session_id(db, attempt['session_id']) if attempt.get('session_id') else None
-        classroom = Classroom.get_by_id(db, session['class_id']) if session and ObjectId.is_valid(session.get('class_id', '')) else None
+        student = db.users.get_by_id(attempt.get('student_id')) if attempt.get('student_id') else None
+        session = Session.get_by_session_id(db, attempt.get('session_id')) if attempt.get('session_id') else None
+        classroom = Classroom.get_by_id(db, session.get('class_id')) if session and session.get('class_id') else None
 
         enriched.append({
             'id': str(attempt['_id']),
@@ -656,7 +668,7 @@ def student_dashboard():
     total_sessions = 0
     classroom_name = 'Not Assigned'
     if current_user.class_id:
-        total_sessions = db.sessions.count_documents({'class_id': current_user.class_id})
+        total_sessions = db.sessions.count(class_id=current_user.class_id)
         cls = Classroom.get_by_id(db, current_user.class_id)
         classroom_lat = None
         classroom_lng = None

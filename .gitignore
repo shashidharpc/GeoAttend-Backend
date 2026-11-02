@@ -3,6 +3,12 @@
 .env.*
 !.env.example
 
+# Firebase Service Account Credentials (CRITICAL: DO NOT COMMIT)
+*firebase*.json
+*serviceAccount*.json
+serviceAccountKey*.json
+credentials.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

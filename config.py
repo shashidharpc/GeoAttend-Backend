@@ -42,10 +42,17 @@ class Config:
         if _pat not in CORS_ORIGINS:
             CORS_ORIGINS.append(_pat)
 
-    # ─── MongoDB Database Configuration ─────────────────────────
+    # ─── Firebase Firestore Configuration ───────────────────────
+    # Supports service account file path, raw JSON, base64-encoded JSON, or project ID
+    FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "")
+    FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON", "")
+    FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "")
+    DATABASE_TYPE = os.getenv("DATABASE_TYPE", "firestore").lower()
+
+    # ─── MongoDB Database Configuration (Fallback & Migration) ──
     MONGO_URI = os.getenv(
         "MONGO_URI",
-        "mongodb+srv://shashidharpc_db_user:<db_password>@cluster0.lanadsm.mongodb.net/?retryWrites=true&w=majority"
+        "mongodb://localhost:27017/"
     )
     MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "qr_attendance_db")
 
